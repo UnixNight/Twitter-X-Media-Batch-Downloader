@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"twitterxmediabatchdownloader/backend"
 
@@ -26,8 +27,19 @@ func NewApp() *App {
 // so we can call the runtime methods
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+
+	// Initialize logger
+	homeDir, _ := os.UserHomeDir()
+	logsDir := filepath.Join(homeDir, "AppData", "Local", "TwitterXDownloader", "logs")
+	if err := backend.InitLogger(logsDir); err != nil {
+		// Fallback to current directory if error
+		backend.InitLogger(".")
+	}
+
 	// Initialize database
 	backend.InitDB()
+	backend.LogDebug("App startup complete")
+
 	// Kill any leftover extractor processes from previous session
 	backend.KillAllExtractorProcesses()
 }
@@ -37,6 +49,8 @@ func (a *App) shutdown(ctx context.Context) {
 	backend.CloseDB()
 	// Kill any running extractor processes
 	backend.KillAllExtractorProcesses()
+	// Close logger
+	backend.CloseLogger()
 }
 
 // CleanupExtractorProcesses kills all running extractor processes
@@ -551,4 +565,17 @@ func (a *App) ImportAccountFromJSON() (ImportAccountResponse, error) {
 		Username: username,
 		Message:  fmt.Sprintf("Successfully imported @%s", username),
 	}, nil
+}
+
+// GetDebugLogs returns recent debug logs for troubleshooting
+func (a *App) GetDebugLogs(maxLines int) (string, error) {
+	if maxLines <= 0 {
+		maxLines = 100
+	}
+	return backend.GetLatestLogs(maxLines)
+}
+
+// GetDebugLogSize returns the size of the current debug log file
+func (a *App) GetDebugLogSize() int64 {
+	return backend.GetLogFileSize()
 }

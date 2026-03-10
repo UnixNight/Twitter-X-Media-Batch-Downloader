@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 // getExecutableName returns the appropriate executable name for the current OS
@@ -41,8 +42,16 @@ func KillAllExtractorProcesses() {
 
 // parseExtractorError parses the extractor output and returns a user-friendly error message
 // while preserving the original error from gallery-dl
-func parseExtractorError(output string, username string) string {
+func parseExtractorError(output string, username string, duration time.Duration) string {
 	outputLower := strings.ToLower(output)
+
+	// Check for timeout/silent hang (no output but took ~60 seconds)
+	if strings.TrimSpace(output) == "" {
+		if duration > 55*time.Second {
+			return "timeout_error: Extractor timed out after " + fmt.Sprintf("%.0f", duration.Seconds()) + " seconds. This usually indicates rate limiting. Wait 5-15 minutes before retrying."
+		}
+		return "silent_error: Extractor failed with no output. Check if the account exists or is accessible."
+	}
 
 	// Extract the actual error line from gallery-dl output
 	lines := strings.Split(output, "\n")
@@ -197,24 +206,24 @@ type CLIResponse struct {
 
 // TimelineEntry represents a single media entry for frontend (converted from MediaItem)
 type TimelineEntry struct {
-	URL           string        `json:"url"`
-	Date          string        `json:"date"`
-	TweetID       TweetIDString `json:"tweet_id"`
-	Type          string        `json:"type"`
-	IsRetweet     bool          `json:"is_retweet"`
-	Extension     string        `json:"extension"`
-	Width         int           `json:"width"`
-	Height        int           `json:"height"`
-	Content       string        `json:"content,omitempty"`
-	ViewCount     int           `json:"view_count,omitempty"`
-	BookmarkCount int           `json:"bookmark_count,omitempty"`
-	FavoriteCount int           `json:"favorite_count,omitempty"`
-	RetweetCount  int           `json:"retweet_count,omitempty"`
-	ReplyCount    int           `json:"reply_count,omitempty"`
-	Source        string        `json:"source,omitempty"`
-	Verified      bool          `json:"verified,omitempty"`
-	OriginalFilename string     `json:"original_filename,omitempty"` // Original filename from API
-	AuthorUsername string       `json:"author_username,omitempty"`   // Username of tweet author (for bookmarks and likes)
+	URL              string        `json:"url"`
+	Date             string        `json:"date"`
+	TweetID          TweetIDString `json:"tweet_id"`
+	Type             string        `json:"type"`
+	IsRetweet        bool          `json:"is_retweet"`
+	Extension        string        `json:"extension"`
+	Width            int           `json:"width"`
+	Height           int           `json:"height"`
+	Content          string        `json:"content,omitempty"`
+	ViewCount        int           `json:"view_count,omitempty"`
+	BookmarkCount    int           `json:"bookmark_count,omitempty"`
+	FavoriteCount    int           `json:"favorite_count,omitempty"`
+	RetweetCount     int           `json:"retweet_count,omitempty"`
+	ReplyCount       int           `json:"reply_count,omitempty"`
+	Source           string        `json:"source,omitempty"`
+	Verified         bool          `json:"verified,omitempty"`
+	OriginalFilename string        `json:"original_filename,omitempty"` // Original filename from API
+	AuthorUsername   string        `json:"author_username,omitempty"`   // Username of tweet author (for bookmarks and likes)
 }
 
 // AccountInfo represents Twitter account information (derived from metadata)
@@ -383,20 +392,20 @@ func buildSearchURL(username, startDate, endDate, mediaFilter string, includeRet
 // convertMetadataToTimelineEntry converts metadata-only tweets to timeline entries
 func convertMetadataToTimelineEntry(meta TweetMetadata) TimelineEntry {
 	return TimelineEntry{
-		URL:           "",
-		Date:          meta.Date,
-		TweetID:       meta.TweetID,
-		Type:          "text",
-		IsRetweet:     meta.RetweetID != 0,
-		Extension:     "txt",
-		Width:         0,
-		Height:        0,
-		Content:       meta.Content,
-		ViewCount:     meta.ViewCount,
-		BookmarkCount: meta.BookmarkCount,
-		FavoriteCount: meta.FavoriteCount,
-		RetweetCount:  meta.RetweetCount,
-		ReplyCount:    meta.ReplyCount,
+		URL:            "",
+		Date:           meta.Date,
+		TweetID:        meta.TweetID,
+		Type:           "text",
+		IsRetweet:      meta.RetweetID != 0,
+		Extension:      "txt",
+		Width:          0,
+		Height:         0,
+		Content:        meta.Content,
+		ViewCount:      meta.ViewCount,
+		BookmarkCount:  meta.BookmarkCount,
+		FavoriteCount:  meta.FavoriteCount,
+		RetweetCount:   meta.RetweetCount,
+		ReplyCount:     meta.ReplyCount,
 		AuthorUsername: meta.Author.Name,
 	}
 }
@@ -413,22 +422,22 @@ func convertToTimelineEntry(media CLIMediaItem) TimelineEntry {
 	}
 
 	entry := TimelineEntry{
-		URL:              media.URL,
-		TweetID:          media.TweetID,
-		Date:             media.Date,
-		Extension:        media.Extension,
-		Width:            media.Width,
-		Height:           media.Height,
-		IsRetweet:        media.RetweetID != 0,
-		Content:          media.Content,
-		ViewCount:        media.ViewCount,
-		BookmarkCount:    media.BookmarkCount,
-		FavoriteCount:    media.FavoriteCount,
-		RetweetCount:     media.RetweetCount,
-		ReplyCount:       media.ReplyCount,
-		Source:           media.Source,
-		Verified:         media.Author.Verified,
-		AuthorUsername:   authorUsername,
+		URL:            media.URL,
+		TweetID:        media.TweetID,
+		Date:           media.Date,
+		Extension:      media.Extension,
+		Width:          media.Width,
+		Height:         media.Height,
+		IsRetweet:      media.RetweetID != 0,
+		Content:        media.Content,
+		ViewCount:      media.ViewCount,
+		BookmarkCount:  media.BookmarkCount,
+		FavoriteCount:  media.FavoriteCount,
+		RetweetCount:   media.RetweetCount,
+		ReplyCount:     media.ReplyCount,
+		Source:         media.Source,
+		Verified:       media.Author.Verified,
+		AuthorUsername: authorUsername,
 		// OriginalFilename will be extracted from URL in download.go
 	}
 
@@ -592,14 +601,37 @@ func ExtractTimeline(req TimelineRequest) (*TwitterResponse, error) {
 		args = append(args, "--cursor", req.Cursor)
 	}
 
-	// Execute command with UTF-8 encoding
+	// Execute command with UTF-8 encoding and capture output separately
+	startTime := time.Now()
 	cmd := exec.Command(exePath, args...)
 	cmd.Env = append(os.Environ(),
 		"PYTHONIOENCODING=utf-8",
 		"PYTHONUTF8=1",
 	)
 	hideWindow(cmd) // Hide console window on Windows
-	output, err := cmd.CombinedOutput()
+
+	// Capture stdout and stderr separately
+	var stdoutBuf, stderrBuf strings.Builder
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	err = cmd.Run()
+	duration := time.Since(startTime)
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	stdout := stdoutBuf.String()
+	stderr := stderrBuf.String()
+	output := stdout + stderr // Combined for error parsing
+
+	// Log the extraction attempt with full details
+	LogExtractorCall(req.Username, req.TimelineType, args, exitCode, stdout, stderr, duration)
 
 	// Ensure process is killed after completion
 	if cmd.Process != nil {
@@ -607,15 +639,17 @@ func ExtractTimeline(req TimelineRequest) (*TwitterResponse, error) {
 	}
 
 	if err != nil {
-		outputStr := string(output)
-		errorMsg := parseExtractorError(outputStr, req.Username)
+		outputStr := output
+		errorMsg := parseExtractorError(outputStr, req.Username, duration)
+		LogError("Extraction failed for @%s (%s): %s", req.Username, req.TimelineType, errorMsg)
 		return nil, fmt.Errorf("%s", errorMsg)
 	}
 
 	// Find JSON in output (skip any info messages)
-	jsonStr := extractJSON(string(output))
+	jsonStr := extractJSON(output)
 	if jsonStr == "" {
-		outputStr := string(output)
+		outputStr := output
+		LogWarning("Unable to parse JSON from extractor output for @%s. Output length: %d bytes", req.Username, len(outputStr))
 		if strings.TrimSpace(outputStr) == "" {
 			return nil, fmt.Errorf("empty_response: Extractor returned no data. The timeline may be empty or inaccessible")
 		}
@@ -625,8 +659,11 @@ func ExtractTimeline(req TimelineRequest) (*TwitterResponse, error) {
 	// Parse CLI response
 	var cliResponse CLIResponse
 	if err := json.Unmarshal([]byte(jsonStr), &cliResponse); err != nil {
+		LogError("Failed to parse JSON for @%s: %v", req.Username, err)
 		return nil, fmt.Errorf("json_error: Failed to parse JSON response: %v", err)
 	}
+
+	LogDebug("Extracted %d media items and %d metadata entries for @%s", len(cliResponse.Media), len(cliResponse.Metadata), req.Username)
 
 	// Convert to frontend format
 	var timeline []TimelineEntry
@@ -713,20 +750,20 @@ func ExtractTimeline(req TimelineRequest) (*TwitterResponse, error) {
 		timeline = make([]TimelineEntry, 0, len(cliResponse.Metadata))
 		for _, meta := range cliResponse.Metadata {
 			entry := TimelineEntry{
-				URL:           "", // No media URL for text tweets
-				TweetID:       meta.TweetID,
-				Date:          meta.Date,
-				Type:          "text",
-				IsRetweet:     meta.RetweetID != 0,
-				Extension:     "txt",
-				Width:         0,
-				Height:        0,
-				Content:       meta.Content,
-				ViewCount:     meta.ViewCount,
-				BookmarkCount: meta.BookmarkCount,
-				FavoriteCount: meta.FavoriteCount,
-				RetweetCount:  meta.RetweetCount,
-				ReplyCount:    meta.ReplyCount,
+				URL:            "", // No media URL for text tweets
+				TweetID:        meta.TweetID,
+				Date:           meta.Date,
+				Type:           "text",
+				IsRetweet:      meta.RetweetID != 0,
+				Extension:      "txt",
+				Width:          0,
+				Height:         0,
+				Content:        meta.Content,
+				ViewCount:      meta.ViewCount,
+				BookmarkCount:  meta.BookmarkCount,
+				FavoriteCount:  meta.FavoriteCount,
+				RetweetCount:   meta.RetweetCount,
+				ReplyCount:     meta.ReplyCount,
 				AuthorUsername: meta.Author.Name,
 			}
 			timeline = append(timeline, entry)
@@ -796,14 +833,37 @@ func ExtractDateRange(req DateRangeRequest) (*TwitterResponse, error) {
 		args = append(args, "--text-tweets")
 	}
 
-	// Execute command with UTF-8 encoding
+	// Execute command with UTF-8 encoding and capture output separately
+	startTime := time.Now()
 	cmd := exec.Command(exePath, args...)
 	cmd.Env = append(os.Environ(),
 		"PYTHONIOENCODING=utf-8",
 		"PYTHONUTF8=1",
 	)
 	hideWindow(cmd)
-	output, err := cmd.CombinedOutput()
+
+	// Capture stdout and stderr separately
+	var stdoutBuf, stderrBuf strings.Builder
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
+
+	err = cmd.Run()
+	duration := time.Since(startTime)
+	exitCode := 0
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	stdout := stdoutBuf.String()
+	stderr := stderrBuf.String()
+	output := stdout + stderr
+
+	// Log the extraction attempt with full details
+	LogExtractorCall(req.Username, "daterange", args, exitCode, stdout, stderr, duration)
 
 	// Ensure process is killed after completion
 	if cmd.Process != nil {
@@ -811,15 +871,17 @@ func ExtractDateRange(req DateRangeRequest) (*TwitterResponse, error) {
 	}
 
 	if err != nil {
-		outputStr := string(output)
-		errorMsg := parseExtractorError(outputStr, req.Username)
+		outputStr := output
+		errorMsg := parseExtractorError(outputStr, req.Username, duration)
+		LogError("Date range extraction failed for @%s (%s-%s): %s", req.Username, req.StartDate, req.EndDate, errorMsg)
 		return nil, fmt.Errorf("%s", errorMsg)
 	}
 
 	// Find JSON in output (skip any info messages)
-	jsonStr := extractJSON(string(output))
+	jsonStr := extractJSON(output)
 	if jsonStr == "" {
-		outputStr := string(output)
+		outputStr := output
+		LogWarning("Unable to parse JSON from date range extractor output for @%s. Output length: %d bytes", req.Username, len(outputStr))
 		if strings.TrimSpace(outputStr) == "" {
 			return nil, fmt.Errorf("empty_response: Extractor returned no data. The timeline may be empty or inaccessible")
 		}
@@ -829,8 +891,11 @@ func ExtractDateRange(req DateRangeRequest) (*TwitterResponse, error) {
 	// Parse CLI response
 	var cliResponse CLIResponse
 	if err := json.Unmarshal([]byte(jsonStr), &cliResponse); err != nil {
+		LogError("Failed to parse JSON for date range @%s: %v", req.Username, err)
 		return nil, fmt.Errorf("json_error: Failed to parse JSON response: %v", err)
 	}
+
+	LogDebug("Extracted %d media items and %d metadata entries for @%s (date range %s-%s)", len(cliResponse.Media), len(cliResponse.Metadata), req.Username, req.StartDate, req.EndDate)
 
 	// Convert to frontend format
 	mediaTweetIDs := make(map[int64]bool)
