@@ -5,12 +5,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
 
@@ -295,7 +298,7 @@ func buildTwitterURL(username, timelineType string) string {
 	case "media":
 		return baseURL + "/media"
 	case "timeline":
-		return baseURL + "/timeline" // Best for cursor support
+		return baseURL + "/tweets" // Use /tweets to get direct URLs instead of Queue messages
 	case "tweets":
 		return baseURL + "/tweets"
 	case "with_replies":
@@ -303,7 +306,7 @@ func buildTwitterURL(username, timelineType string) string {
 	case "likes":
 		return baseURL + "/likes"
 	default:
-		return baseURL + "/timeline" // Default to timeline for reliable cursor
+		return baseURL + "/tweets" // Default to /tweets for direct media extraction
 	}
 }
 
@@ -551,6 +554,9 @@ func ExtractTimeline(req TimelineRequest) (*TwitterResponse, error) {
 
 	url := buildTwitterURL(req.Username, timelineType)
 
+	// DEBUG: Log the exact URL being used
+	LogDebug("EXTRACTOR_DEBUG: URL being used: %s", url)
+
 	// Build command arguments for new CLI format
 	// Format: extractor.exe URL --auth-token TOKEN --json [options]
 	args := []string{url}
@@ -604,17 +610,27 @@ func ExtractTimeline(req TimelineRequest) (*TwitterResponse, error) {
 	// Execute command with UTF-8 encoding and capture output separately
 	startTime := time.Now()
 	cmd := exec.Command(exePath, args...)
+
+	// DEBUG: Log the complete command line
+	LogDebug("EXTRACTOR_DEBUG: Full command: %s %v", exePath, args)
+
 	cmd.Env = append(os.Environ(),
 		"PYTHONIOENCODING=utf-8",
 		"PYTHONUTF8=1",
 	)
-	hideWindow(cmd) // Hide console window on Windows
 
-	// Capture stdout and stderr separately
+	// NOTE: Don't hide window - causes I/O issues. Instead set a basic SysProcAttr
+	if runtime.GOOS == "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+
+	// Use buffers to capture output directly
 	var stdoutBuf, stderrBuf strings.Builder
 	cmd.Stdout = &stdoutBuf
 	cmd.Stderr = &stderrBuf
+	cmd.Stdin = nil
 
+	// Execute the command
 	err = cmd.Run()
 	duration := time.Since(startTime)
 	exitCode := 0
@@ -629,6 +645,20 @@ func ExtractTimeline(req TimelineRequest) (*TwitterResponse, error) {
 	stdout := stdoutBuf.String()
 	stderr := stderrBuf.String()
 	output := stdout + stderr // Combined for error parsing
+
+	// DEBUG: Log raw captured output
+	LogDebug("EXTRACTOR_DEBUG: Exit code: %d, Duration: %v ms", exitCode, duration.Milliseconds())
+	LogDebug("EXTRACTOR_DEBUG: Stdout length: %d bytes, Stderr length: %d bytes", len(stdout), len(stderr))
+	if len(stdout) > 500 {
+		LogDebug("EXTRACTOR_DEBUG: Stdout (first 500 chars): %s", stdout[:500])
+	} else if len(stdout) > 0 {
+		LogDebug("EXTRACTOR_DEBUG: Stdout: %s", stdout)
+	}
+	if len(stderr) > 500 {
+		LogDebug("EXTRACTOR_DEBUG: Stderr (first 500 chars): %s", stderr[:500])
+	} else if len(stderr) > 0 {
+		LogDebug("EXTRACTOR_DEBUG: Stderr: %s", stderr)
+	}
 
 	// Log the extraction attempt with full details
 	LogExtractorCall(req.Username, req.TimelineType, args, exitCode, stdout, stderr, duration)
@@ -840,14 +870,60 @@ func ExtractDateRange(req DateRangeRequest) (*TwitterResponse, error) {
 		"PYTHONIOENCODING=utf-8",
 		"PYTHONUTF8=1",
 	)
-	hideWindow(cmd)
 
-	// Capture stdout and stderr separately
+	// Set stdin to nothing (no input needed)
+	cmd.Stdin = nil
+
+	// NOTE: Don't hide window - causes I/O issues. Instead set a basic SysProcAttr
+	if runtime.GOOS == "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+
+	// Capture stdout and stderr using pipes for better I/O handling
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed_to_create_stdout_pipe: %v", err)
+	}
+
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("failed_to_create_stderr_pipe: %v", err)
+	}
+
+	// Start the command (don't wait yet)
+	err = cmd.Start()
+	if err != nil {
+		return nil, fmt.Errorf("failed_to_start_extractor: %v", err)
+	}
+
+	// Read pipes in goroutines with WaitGroup to ensure completion
 	var stdoutBuf, stderrBuf strings.Builder
-	cmd.Stdout = &stdoutBuf
-	cmd.Stderr = &stderrBuf
+	var wg sync.WaitGroup
 
-	err = cmd.Run()
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// Read from stdout pipe
+		if _, err := io.Copy(&stdoutBuf, stdoutPipe); err != nil {
+			LogDebug("EXTRACTOR_DEBUG: Error reading stdout: %v", err)
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		// Read from stderr pipe
+		if _, err := io.Copy(&stderrBuf, stderrPipe); err != nil {
+			LogDebug("EXTRACTOR_DEBUG: Error reading stderr: %v", err)
+		}
+	}()
+
+	// Wait for command to complete
+	err = cmd.Wait()
+
+	// Wait for all pipe reads to complete
+	wg.Wait()
+
 	duration := time.Since(startTime)
 	exitCode := 0
 	if err != nil {

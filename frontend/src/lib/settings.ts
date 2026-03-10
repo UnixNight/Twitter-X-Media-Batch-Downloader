@@ -15,6 +15,7 @@ export interface Settings {
   gifQuality: GifQuality;
   gifResolution: GifResolution;
   proxy: string; // Proxy URL (e.g., http://proxy:port or socks5://proxy:port). Empty to use system proxy or no proxy.
+  authToken: string; // X/Twitter auth token for authenticated requests
   fetchTimeout: number; // Fetch timeout in seconds. Default: 60 seconds.
   fetchMode: FetchMode; // Fetch mode: single (all at once) or batch (200 per request). Default: batch.
   mediaType: MediaType; // Media type filter. Default: all.
@@ -30,6 +31,7 @@ export const DEFAULT_SETTINGS: Settings = {
   gifQuality: "fast",
   gifResolution: "original",
   proxy: "",
+  authToken: "",
   fetchTimeout: 60, // Default: 60 seconds
   fetchMode: "batch", // Default: batch mode (200 per request)
   mediaType: "all", // Default: all media

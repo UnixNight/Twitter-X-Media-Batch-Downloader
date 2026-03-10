@@ -889,17 +889,14 @@ function App() {
     setIsFetchingAll(true);
     stopAllRef.current = false;
 
-    // Get auth token from localStorage (same as SearchBar)
-    const PUBLIC_AUTH_TOKEN_KEY = "twitter_public_auth_token";
-    const authToken = localStorage.getItem(PUBLIC_AUTH_TOKEN_KEY) || "";
+    // Get auth token and timeout from settings
+    const settings = getSettings();
+    const authToken = settings.authToken || "";
     if (!authToken.trim()) {
-      toast.error("Please enter your auth token");
+      toast.error("Please enter X/Twitter auth token in Settings");
       setIsFetchingAll(false);
       return;
     }
-
-      // Get timeout from settings
-      const settings = getSettings();
       const timeoutSeconds = settings.fetchTimeout || 60;
 
       // Reset all accounts to pending
@@ -1371,16 +1368,13 @@ function App() {
     const account = multipleAccounts.find((acc) => acc.id === accountId);
     if (!account) return;
 
-    // Get auth token from localStorage
-    const PUBLIC_AUTH_TOKEN_KEY = "twitter_public_auth_token";
-    const authToken = localStorage.getItem(PUBLIC_AUTH_TOKEN_KEY) || "";
+    // Get auth token and settings
+    const retrySettings = getSettings();
+    const authToken = retrySettings.authToken || "";
     if (!authToken.trim()) {
-      toast.error("Please enter your auth token");
+      toast.error("Please enter X/Twitter auth token in Settings");
       return;
     }
-
-    // Get fetch mode from settings
-    const retrySettings = getSettings();
     const isSingleModeRetry = retrySettings.fetchMode === "single";
     const batchSizeRetry = isSingleModeRetry ? 0 : BATCH_SIZE;
 

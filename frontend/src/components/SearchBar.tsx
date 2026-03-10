@@ -11,8 +11,6 @@ import {
   Bookmark,
   Heart,
   Key,
-  Eye,
-  EyeOff,
   ChevronDown,
   ChevronUp,
   Info,
@@ -54,10 +52,6 @@ import { getSettings, updateSettings, type FetchMode as SettingsFetchMode, type 
 export type FetchMode = "public" | "private";
 export type PrivateType = "bookmarks" | "likes";
 export type FetchType = "single" | "multiple";
-
-// Local storage keys for auth tokens
-const PUBLIC_AUTH_TOKEN_KEY = "twitter_public_auth_token";
-const PRIVATE_AUTH_TOKEN_KEY = "twitter_private_auth_token";
 
 export interface MultipleAccount {
   id: string;
@@ -170,44 +164,22 @@ export function SearchBar({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [currentFetchMode, setCurrentFetchMode] = useState<SettingsFetchMode>(getSettings().fetchMode);
 
-  // Separate auth tokens for public and private modes
-  const [publicAuthToken, setPublicAuthToken] = useState("");
-  const [privateAuthToken, setPrivateAuthToken] = useState("");
-  const [showPublicToken, setShowPublicToken] = useState(false);
-  const [showPrivateToken, setShowPrivateToken] = useState(false);
-
-  // Load saved auth tokens on mount
-  useEffect(() => {
-    const savedPublicToken = localStorage.getItem(PUBLIC_AUTH_TOKEN_KEY) || "";
-    const savedPrivateToken = localStorage.getItem(PRIVATE_AUTH_TOKEN_KEY) || "";
-    setPublicAuthToken(savedPublicToken);
-    setPrivateAuthToken(savedPrivateToken);
-  }, []);
-
-  // Save auth tokens when they change
-  const handlePublicTokenChange = (value: string) => {
-    setPublicAuthToken(value);
-    localStorage.setItem(PUBLIC_AUTH_TOKEN_KEY, value);
-  };
-
-  const handlePrivateTokenChange = (value: string) => {
-    setPrivateAuthToken(value);
-    localStorage.setItem(PRIVATE_AUTH_TOKEN_KEY, value);
-  };
+  // Get auth token from settings (single unified token for all modes)
+  const authTokenFromSettings = getSettings().authToken || "";
 
   const handleFetch = () => {
-    const authToken = mode === "public" ? publicAuthToken : privateAuthToken;
-    onFetch(useDateRange, startDate, endDate, mediaType, retweets, mode, privateType, authToken, false);
+    // Use auth token from settings
+    onFetch(useDateRange, startDate, endDate, mediaType, retweets, mode, privateType, authTokenFromSettings, false);
   };
 
   const handleResume = () => {
-    const authToken = mode === "public" ? publicAuthToken : privateAuthToken;
+    // Use auth token from settings
     if (onResume) {
-      onResume(authToken, mediaType, retweets);
+      onResume(authTokenFromSettings, mediaType, retweets);
     }
   };
 
-  const currentAuthToken = mode === "public" ? publicAuthToken : privateAuthToken;
+  const currentAuthToken = authTokenFromSettings;
   const hasAuthToken = currentAuthToken.trim().length > 0;
   // Likes needs username (URL is /username/likes), bookmarks doesn't
   const isLikesMode = mode === "private" && privateType === "likes";
@@ -542,63 +514,22 @@ export function SearchBar({
         )}
       </div>
 
-      {/* Auth Token Input (collapsible) */}
+      {/* Auth Token Info - Configured in Settings */}
       {showAuthInput && (
         <div className="p-3 border rounded-lg bg-muted/30">
           <div className="flex items-center gap-3">
-            <div className="flex items-center gap-1.5">
-              <Label htmlFor="auth-token" className="text-sm whitespace-nowrap">
-                Auth Token
-              </Label>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Info className="h-4 w-4 text-muted-foreground cursor-help" />
-                </TooltipTrigger>
-                <TooltipContent className="text-center">
-                  {mode === "private" ? (
-                    <p>Use auth token from the account whose bookmarks/likes you want to fetch</p>
-                  ) : (
-                    <p>Recommended to use a dummy account, not your main account.<br />Excessive usage may cause suspension</p>
-                  )}
-                </TooltipContent>
-              </Tooltip>
-            </div>
-            <div className="relative flex-1">
-              <InputWithContext
-                id="auth-token"
-                type={
-                  mode === "public"
-                    ? showPublicToken
-                      ? "text"
-                      : "password"
-                    : showPrivateToken
-                      ? "text"
-                      : "password"
-                }
-                placeholder="Enter your auth_token cookie value"
-                value={currentAuthToken}
-                onChange={(e) =>
-                  mode === "public"
-                    ? handlePublicTokenChange(e.target.value)
-                    : handlePrivateTokenChange(e.target.value)
-                }
-                className="pr-10 bg-background"
-              />
-              <button
-                type="button"
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() =>
-                  mode === "public"
-                    ? setShowPublicToken(!showPublicToken)
-                    : setShowPrivateToken(!showPrivateToken)
-                }
-              >
-                {(mode === "public" ? showPublicToken : showPrivateToken) ? (
-                  <EyeOff className="h-4 w-4" />
-                ) : (
-                  <Eye className="h-4 w-4" />
-                )}
-              </button>
+            <div className="flex items-center gap-2 text-sm">
+              {authTokenFromSettings ? (
+                <>
+                  <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                  <span>Auth token configured in Settings</span>
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                  <span>Configure auth token in Settings</span>
+                </>
+              )}
             </div>
           </div>
         </div>

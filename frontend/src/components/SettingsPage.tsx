@@ -384,6 +384,29 @@ export function SettingsPage() {
             />
           </div>
 
+          {/* X/Twitter Auth Token */}
+          <div className="space-y-2">
+            <Label htmlFor="auth-token" className="flex items-center gap-2">
+              X/Twitter Auth Token
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Info className="h-3.5 w-3.5 text-muted-foreground cursor-help" />
+                </TooltipTrigger>
+                <TooltipContent side="top" className="max-w-xs">
+                  <p>Optional. Get from browser DevTools (Cookies → auth_token) to access protected accounts</p>
+                </TooltipContent>
+              </Tooltip>
+            </Label>
+            <InputWithContext
+              id="auth-token"
+              value={tempSettings.authToken || ""}
+              onChange={(e) => setTempSettings((prev) => ({ ...prev, authToken: e.target.value }))}
+              placeholder="Paste auth_token here (optional)"
+              className="w-[90%] font-mono text-sm"
+              type="password"
+            />
+          </div>
+
           {/* Fetch Timeout */}
           <div className="space-y-2">
             <Label htmlFor="fetch-timeout" className="flex items-center gap-2">
